@@ -44,5 +44,8 @@
     "grunt-remove-logging": "~0.2.0"
   },
   "main": "dist/leaflet.timedimension.src.js",
-  "style": "dist/leaflet.timedimension.control.css"
+  "style": "dist/leaflet.timedimension.control.css",
+  "scripts": {
+    "build": "grunt"
+  }
 }
