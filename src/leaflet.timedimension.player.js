@@ -13,6 +13,7 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
         L.setOptions(this, options);
         this._timeDimension = timeDimension;
         this._paused = false;
+        this._pauseCount = this.options.pauseCount || 5; // default
         this._buffer = this.options.buffer || 5;
         this._minBufferReady = this.options.minBufferReady || 1;
         this._waitingForBuffer = false;
@@ -23,7 +24,7 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
             this._waitingForBuffer = false; // reset buffer
         }).bind(this));
         this.setTransitionTime(this.options.transitionTime || 1000);
-        
+
         this._timeDimension.on('limitschanged availabletimeschanged timeload', (function(data) {
             this._timeDimension.prepareNextTimes(this._steps, this._minBufferReady, this._loop);
         }).bind(this));
@@ -41,6 +42,14 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
                 this.stop();
                 this.fire('animationfinished');
                 return;
+            } else {
+                // Delay between rounds
+                if (this._paused && this._pauseCount <= 0) {
+                    this.release();
+                } else {
+                    this.pause();
+                    this.decreasePauseCount();
+                }
             }
         }
 
@@ -87,9 +96,9 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
             this._timeDimension.prepareNextTimes(this._steps, buffer, this._loop);
         }
     },
-    
+
     _getMaxIndex: function(){
-       return Math.min(this._timeDimension.getAvailableTimes().length - 1, 
+       return Math.min(this._timeDimension.getAvailableTimes().length - 1,
                        this._timeDimension.getUpperLimitIndex() || Infinity);
     },
 
@@ -126,8 +135,13 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
         this._paused = true;
     },
 
+    decreasePauseCount: function () {
+        this._pauseCount = this._pauseCount - 1;
+    },
+
     release: function () {
         this._paused = false;
+        this._pauseCount = this.options.pauseCount || 5; // default
     },
 
     getTransitionTime: function() {
