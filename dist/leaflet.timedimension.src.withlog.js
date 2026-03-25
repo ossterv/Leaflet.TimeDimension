@@ -1,14 +1,14 @@
 /* 
- * Leaflet TimeDimension v1.1.1 - 2019-11-05 
+ * Leaflet TimeDimension v1.1.1 - 2024-12-24 
  * 
- * Copyright 2019 Biel Frontera (ICTS SOCIB) 
+ * Copyright 2024 Biel Frontera (ICTS SOCIB) 
  * datacenter@socib.es 
- * http://www.socib.es/ 
+ * https://www.socib.es/ 
  * 
  * Licensed under the MIT license. 
  * 
  * Demos: 
- * http://apps.socib.es/Leaflet.TimeDimension/ 
+ * https://apps.socib.es/Leaflet.TimeDimension/ 
  * 
  * Source: 
  * git://github.com/socib/Leaflet.TimeDimension.git 
@@ -419,7 +419,7 @@ L.timeDimension = function (options) {
 L.TimeDimension.Util = {
     getTimeDuration: function(ISODuration) {
         if (typeof nezasa === 'undefined') {
-            throw "iso8601-js-period library is required for Leatlet.TimeDimension: https://github.com/nezasa/iso8601-js-period";
+            throw "iso8601-js-period library is required for Leatlet.TimeDimension: https://www.npmjs.com/package/iso8601-js-period";
         }
         return nezasa.iso8601.Period.parse(ISODuration, true);
     },
@@ -612,7 +612,9 @@ L.TimeDimension.Util = {
     },
 
     sort_and_deduplicate: function(arr) {
-        arr = arr.slice(0).sort();
+        arr = arr.slice(0).sort(function (a, b) {
+            return a - b;
+        });
         var result = [];
         var last = null;
         for (var i = 0, l = arr.length; i < l; i++) {
@@ -930,7 +932,7 @@ L.TimeDimension.Layer.WMS = L.TimeDimension.Layer.extend({
     },
 
     _getLayerForTime: function(time) {
-        if (time == 0 || time == this._defaultTime || time == null) {
+        if (time == this._defaultTime || time == null) {
             return this._baseLayer;
         }
         if (this._layers.hasOwnProperty(time)) {
@@ -1257,7 +1259,7 @@ L.TimeDimension.Layer.GeoJson = L.TimeDimension.Layer.extend({
         this._duration = this.options.duration || null;
         this._addlastPoint = this.options.addlastPoint || false;
         this._waitForReady = this.options.waitForReady || false;
-        this._defaultTime = 0;
+        this._updateCurrentTime = this.options.updateCurrentTime || this._updateTimeDimension;        
         this._availableTimes = [];
         this._loaded = false;
         if (this._baseLayer.getLayers().length == 0) {
@@ -1358,8 +1360,12 @@ L.TimeDimension.Layer.GeoJson = L.TimeDimension.Layer.extend({
             }
         }
         this._availableTimes = L.TimeDimension.Util.sort_and_deduplicate(times);
+        this._updateCurrentTime = this._updateCurrentTime || (this._timeDimension && this._timeDimension.getAvailableTimes().length == 0);
         if (this._timeDimension && (this._updateTimeDimension || this._timeDimension.getAvailableTimes().length == 0)) {
             this._timeDimension.setAvailableTimes(this._availableTimes, this._updateTimeDimensionMode);
+        }
+        if (this._updateCurrentTime && this._timeDimension && this._availableTimes.length) {
+            this._timeDimension.setCurrentTime(this._availableTimes[0]);
         }
     },
 
@@ -1404,10 +1410,10 @@ L.TimeDimension.Layer.GeoJson = L.TimeDimension.Layer.extend({
             return null;
         }
 
-        if (featureTimes[l - 1] > minTime) {
+        if (featureTimes[l - 1] >= minTime) {
             for (var i = 0; i < l; i++) {
-                if (index_min === null && featureTimes[i] > minTime) {
-                    // set index_min the first time that current time is greater the minTime
+                if (index_min === null && featureTimes[i] >= minTime) {
+                    // set index_min the first time that current time is greater or equal to the minTime
                     index_min = i;
                 }
                 if (featureTimes[i] > maxTime) {
@@ -1465,6 +1471,7 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
         L.setOptions(this, options);
         this._timeDimension = timeDimension;
         this._paused = false;
+        this._pauseCount = this.options.pauseCount || 5; // default
         this._buffer = this.options.buffer || 5;
         this._minBufferReady = this.options.minBufferReady || 1;
         this._waitingForBuffer = false;
@@ -1475,7 +1482,7 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
             this._waitingForBuffer = false; // reset buffer
         }).bind(this));
         this.setTransitionTime(this.options.transitionTime || 1000);
-        
+
         this._timeDimension.on('limitschanged availabletimeschanged timeload', (function(data) {
             this._timeDimension.prepareNextTimes(this._steps, this._minBufferReady, this._loop);
         }).bind(this));
@@ -1493,6 +1500,14 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
                 this.stop();
                 this.fire('animationfinished');
                 return;
+            } else {
+                // Delay between rounds
+                if (this._paused && this._pauseCount <= 0) {
+                    this.release();
+                } else {
+                    this.pause();
+                    this.decreasePauseCount();
+                }
             }
         }
 
@@ -1539,9 +1554,9 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
             this._timeDimension.prepareNextTimes(this._steps, buffer, this._loop);
         }
     },
-    
+
     _getMaxIndex: function(){
-       return Math.min(this._timeDimension.getAvailableTimes().length - 1, 
+       return Math.min(this._timeDimension.getAvailableTimes().length - 1,
                        this._timeDimension.getUpperLimitIndex() || Infinity);
     },
 
@@ -1549,16 +1564,19 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
         if (this._intervalID) return;
         this._steps = numSteps || 1;
         this._waitingForBuffer = false;
+        var startedOver = false;
         if (this.options.startOver){
             if (this._timeDimension.getCurrentTimeIndex() === this._getMaxIndex()){
-                 this._timeDimension.setCurrentTimeIndex(this._timeDimension.getLowerLimitIndex() || 0);
+                this._timeDimension.setCurrentTimeIndex(this._timeDimension.getLowerLimitIndex() || 0);
+                startedOver = true;
             }
         }
         this.release();
         this._intervalID = window.setInterval(
             L.bind(this._tick, this),
             this._transitionTime);
-        this._tick();
+        if (!startedOver)
+            this._tick();
         this.fire('play');
         this.fire('running');
     },
@@ -1575,8 +1593,13 @@ L.TimeDimension.Player = (L.Layer || L.Class).extend({
         this._paused = true;
     },
 
+    decreasePauseCount: function () {
+        this._pauseCount = this._pauseCount - 1;
+    },
+
     release: function () {
         this._paused = false;
+        this._pauseCount = this.options.pauseCount || 5; // default
     },
 
     getTransitionTime: function() {
